@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TCP Congestion Control Simulator</title>
+<style>
+  :root{
+    --bg:#f6f6f3; --panel:#ffffff; --ink:#1f1f1e; --muted:#6b6a64; --line:#e4e3de; --accent:#1f4e8c;
+    --ss:#2a78d6; --aimd:#eb6834; --tahoe:#1baf7a; --reno:#eda100; --dla:#e0618f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 "Segoe UI",system-ui,-apple-system,Arial,sans-serif}
+  header{background:#14365f;color:#fff;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+  header h1{margin:0;font-size:19px;font-weight:600}
+  header .sub{font-size:12.5px;opacity:.8}
+  main{display:grid;grid-template-columns:300px 1fr;gap:18px;padding:18px 24px;max-width:1400px;margin:auto}
+  @media (max-width:900px){main{grid-template-columns:1fr;padding:12px 16px}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 12px}
+  label.row{display:block;margin-bottom:14px}
+  .lbl{display:flex;justify-content:space-between;font-weight:600;margin-bottom:4px}
+  .lbl span:last-child{color:var(--accent);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .presets{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+  .presets button{border:1px solid var(--line);background:#fafaf8;border-radius:16px;padding:4px 10px;font-size:12px;cursor:pointer}
+  .presets button:hover{border-color:var(--accent);color:var(--accent)}
+  .algos label{display:flex;align-items:center;gap:8px;margin:5px 0;cursor:pointer}
+  .sw{width:14px;height:14px;border-radius:3px;display:inline-block}
+  .chk{display:flex;align-items:center;gap:8px;margin:12px 0}
+  #run{width:100%;padding:11px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-size:15px;font-weight:600;cursor:pointer;margin-top:6px}
+  #run:disabled{opacity:.6;cursor:wait}
+  #status{font-size:12.5px;color:var(--muted);margin-top:8px;min-height:18px}
+  .right{display:flex;flex-direction:column;gap:18px;min-width:0}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  th{font-size:12px;color:var(--muted);font-weight:600}
+  tr.best td{font-weight:700}
+  .tablewrap{overflow-x:auto}
+  .chartbox{position:relative}
+  canvas{width:100%;height:280px;display:block}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;margin-bottom:6px}
+  .legend span{display:flex;align-items:center;gap:6px}
+  .tip{position:absolute;pointer-events:none;background:#fff;border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.08);display:none;white-space:nowrap}
+  .note{font-size:12px;color:var(--muted);margin-top:6px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .kpi .v{font-size:22px;font-weight:700}
+  .kpi .k{font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>TCP Congestion Control Simulator</h1>
+    <div class="sub">Case Study 8 &middot; TCP Performance under Different Network Conditions &middot; Computer Networks (22ITC10N), CBIT</div>
+  </div>
+  <div class="sub">Slow Start &middot; AIMD &middot; Tahoe &middot; Reno &middot; Proposed DLA-TCP</div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Network conditions</h2>
+    <div class="presets">
+      <button data-p='{"bandwidth":10,"rtt":50,"loss":0,"buffer":1}'>Clean wired</button>
+      <button data-p='{"bandwidth":10,"rtt":50,"loss":1,"buffer":1}'>Lossy Wi-Fi (1%)</button>
+      <button data-p='{"bandwidth":10,"rtt":300,"loss":0.1,"buffer":1}'>Satellite (300 ms)</button>
+      <button data-p='{"bandwidth":10,"rtt":50,"loss":0,"buffer":4}'>Bufferbloat (4 BDP)</button>
+      <button data-p='{"bandwidth":50,"rtt":50,"loss":0.1,"buffer":1}'>Fast + lossy (50 Mbps)</button>
+    </div>
+    <label class="row"><div class="lbl"><span>Bandwidth</span><span id="v-bandwidth"></span></div>
+      <input type="range" id="bandwidth" min="1" max="50" step="1" value="10"></label>
+    <label class="row"><div class="lbl"><span>Base RTT (latency)</span><span id="v-rtt"></span></div>
+      <input type="range" id="rtt" min="10" max="300" step="5" value="50"></label>
+    <label class="row"><div class="lbl"><span>Random packet loss</span><span id="v-loss"></span></div>
+      <input type="range" id="loss" min="0" max="5" step="0.1" value="0"></label>
+    <label class="row"><div class="lbl"><span>Router buffer (congestion)</span><span id="v-buffer"></span></div>
+      <input type="range" id="buffer" min="0.1" max="4" step="0.1" value="1"></label>
+    <label class="row"><div class="lbl"><span>Simulation time</span><span id="v-duration"></span></div>
+      <input type="range" id="duration" min="5" max="60" step="5" value="20"></label>
+    <label class="chk"><input type="checkbox" id="dynamic"> Changing network (capacity drops, then rises)</label>
+
+    <h2 style="margin-top:6px">Algorithms</h2>
+    <div class="algos" id="algos"></div>
+    <button id="run">&#9654; Run simulation</button>
+    <div id="status">Set the conditions and press Run.</div>
+  </section>
+
+  <section class="right">
+    <div class="kpis" id="kpis"></div>
+    <div class="card">
+      <h2>Results</h2>
+      <div class="tablewrap"><table id="tbl">
+        <thead><tr><th>Algorithm</th><th>Throughput (Mbps)</th><th>Utilisation</th><th>Avg cwnd (pkts)</th>
+          <th>Packet loss</th><th>Mean RTT (ms)</th><th>95th RTT (ms)</th><th>Recovery (ms)</th><th>Timeouts</th></tr></thead>
+        <tbody><tr><td colspan="9" style="text-align:center;color:var(--muted)">No run yet</td></tr></tbody>
+      </table></div>
+      <div class="note">Recovery = average time from detecting a loss until all data outstanding at that moment is acknowledged. Best value per column in bold.</div>
+    </div>
+    <div class="card">
+      <h2>Congestion window over time</h2>
+      <div class="legend" id="lg1"></div>
+      <div class="chartbox"><canvas id="c1"></canvas><div class="tip" id="t1"></div></div>
+      <div class="note" id="n1">Dashed line: bandwidth&ndash;delay product (BDP).</div>
+    </div>
+    <div class="card">
+      <h2>Throughput over time (0.5 s bins)</h2>
+      <div class="legend" id="lg2"></div>
+      <div class="chartbox"><canvas id="c2"></canvas><div class="tip" id="t2"></div></div>
+      <div class="note">Dashed line: link capacity.</div>
+    </div>
+  </section>
+</main>
+
+<script>
+const ALG = [
+  {id:"SS",    name:"Slow Start",   col:"var(--ss)"},
+  {id:"AIMD",  name:"AIMD",         col:"var(--aimd)"},
+  {id:"TAHOE", name:"Tahoe-like",   col:"var(--tahoe)"},
+  {id:"RENO",  name:"Reno-like",    col:"var(--reno)"},
+  {id:"DLA",   name:"Proposed DLA", col:"var(--dla)"},
+];
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v.slice(4,-1)).trim();
+const units = {bandwidth:" Mbps", rtt:" ms", loss:" %", buffer:" × BDP", duration:" s"};
+const $ = id => document.getElementById(id);
+
+// sliders
+for (const k of Object.keys(units)) {
+  const upd = () => $("v-"+k).textContent = $(k).value + units[k];
+  $(k).addEventListener("input", upd); upd();
+}
+document.querySelectorAll(".presets button").forEach(b => b.onclick = () => {
+  const p = JSON.parse(b.dataset.p);
+  for (const k in p) { $(k).value = p[k]; $(k).dispatchEvent(new Event("input")); }
+  run();
+});
+// algorithm checkboxes
+$("algos").innerHTML = ALG.map(a =>
+  `<label><input type="checkbox" value="${a.id}" checked><span class="sw" style="background:${a.col}"></span>${a.name}</label>`).join("");
+
+let last = null;
+async function run() {
+  const algos = [...document.querySelectorAll("#algos input:checked")].map(x => x.value);
+  if (!algos.length) { $("status").textContent = "Select at least one algorithm."; return; }
+  const body = {bandwidth:+$("bandwidth").value, rtt:+$("rtt").value, loss:+$("loss").value,
+                buffer:+$("buffer").value, duration:+$("duration").value, dynamic:$("dynamic").checked, algos};
+  $("run").disabled = true; $("status").textContent = "Simulating " + algos.length + " algorithm(s)…";
+  const t0 = performance.now();
+  try {
+    const r = await fetch("/run", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    d.params = body; last = d;
+    render(d);
+    $("status").textContent = `Done in ${((performance.now()-t0)/1000).toFixed(1)} s · BDP = ${d.bdp} packets, buffer = ${d.buffer_pkts} packets`;
+  } catch (e) { $("status").textContent = "Error: " + e.message; }
+  $("run").disabled = false;
+}
+$("run").onclick = run;
+
+function render(d) {
+  const ids = ALG.filter(a => d.algos[a.id]);
+  // table
+  const cols = [["goodput",2,"max"],["util",1,"max","%"],["mean_cwnd",1,null],["loss_pct",2,"min","%"],
+                ["mean_rtt",1,"min"],["p95_rtt",1,"min"],["rec_ms",0,"min"],["timeouts",0,"min"]];
+  const best = {};
+  cols.forEach(([k,,m]) => { if (m) { const v = ids.map(a => d.algos[a.id].summary[k]); best[k] = m==="max"?Math.max(...v):Math.min(...v); }});
+  $("tbl").querySelector("tbody").innerHTML = ids.map(a => {
+    const s = d.algos[a.id].summary;
+    return `<tr><td><span class="sw" style="background:${a.col};margin-right:6px;vertical-align:-2px"></span>${a.name}</td>` +
+      cols.map(([k,dp,m,u]) => {
+        const v = s[k]; const b = m && v === best[k] ? " style='font-weight:700'" : "";
+        return `<td${b}>${Number(v).toFixed(dp)}${u||""}</td>`; }).join("") + "</tr>";
+  }).join("");
+  // KPIs: best throughput + DLA vs Reno if both present
+  const top = ids.reduce((a,b) => d.algos[a.id].summary.goodput >= d.algos[b.id].summary.goodput ? a : b);
+  let k = `<div class="kpi"><div class="k">Highest throughput</div><div class="v">${top.name}</div><div class="k">${d.algos[top.id].summary.goodput.toFixed(2)} Mbps</div></div>`;
+  if (d.algos.DLA && d.algos.RENO) {
+    const g = d.algos.DLA.summary.goodput / Math.max(d.algos.RENO.summary.goodput, 1e-6);
+    const rt = d.algos.DLA.summary.mean_rtt - d.algos.RENO.summary.mean_rtt;
+    k += `<div class="kpi"><div class="k">DLA vs Reno throughput</div><div class="v">${g.toFixed(2)}×</div></div>`;
+    k += `<div class="kpi"><div class="k">DLA vs Reno mean RTT</div><div class="v">${rt>=0?"+":""}${rt.toFixed(1)} ms</div></div>`;
+  }
+  const lossBest = ids.reduce((a,b) => d.algos[a.id].summary.loss_pct <= d.algos[b.id].summary.loss_pct ? a : b);
+  k += `<div class="kpi"><div class="k">Lowest packet loss</div><div class="v">${lossBest.name}</div><div class="k">${d.algos[lossBest.id].summary.loss_pct.toFixed(2)} %</div></div>`;
+  $("kpis").innerHTML = k;
+  // charts
+  const leg = ids.map(a => `<span><span class="sw" style="background:${a.col}"></span>${a.name}</span>`).join("");
+  $("lg1").innerHTML = leg; $("lg2").innerHTML = leg;
+  const T = d.duration;
+  const cap = t => { const c = d.params.bandwidth; if (!d.params.dynamic) return c;
+                     return t < T/3 ? c : t < 2*T/3 ? c*0.4 : c*1.5; };
+  drawChart("c1","t1", ids.map(a => ({a, ys:d.algos[a.id].cwnd, dt:d.dt_cwnd, t0:0})), T, "packets",
+            t => d.bdp, "BDP");
+  drawChart("c2","t2", ids.map(a => ({a, ys:d.algos[a.id].tp, dt:d.dt_tp, t0:d.dt_tp})), T, "Mbps",
+            cap, "capacity");
+}
+
+function drawChart(cid, tid, series, T, yUnit, refFn, refName) {
+  const cv = $(cid), dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W*dpr; cv.height = H*dpr;
+  const g = cv.getContext("2d"); g.scale(dpr,dpr);
+  const L = 48, R = 12, Tp = 10, B = 36, pw = W-L-R, ph = H-Tp-B;
+  let ymax = 0; series.forEach(s => s.ys.forEach(v => ymax = Math.max(ymax, v)));
+  for (let t=0;t<=T;t+=T/50) ymax = Math.max(ymax, refFn(t));
+  ymax = niceMax(ymax*1.05);
+  const X = t => L + t/T*pw, Y = v => Tp + ph - v/ymax*ph;
+  g.clearRect(0,0,W,H);
+  g.font = "11px Segoe UI, system-ui, sans-serif"; g.fillStyle = css("var(--muted)"); g.strokeStyle = css("var(--line)"); g.lineWidth = 1;
+  for (let i=0;i<=5;i++){ const v=ymax*i/5, y=Y(v); g.beginPath(); g.moveTo(L,y); g.lineTo(W-R,y); g.stroke();
+    g.textAlign="right"; g.fillText(fmt(v), L-6, y+4); }
+  const xs = niceStep(T); for (let t=0;t<=T+1e-9;t+=xs){ const x=X(t); g.textAlign="center"; g.fillText(fmt(t), x, H-20); }
+  g.textAlign="center"; g.fillText("time (s)", L+pw/2, H-1);
+  g.save(); g.translate(11, Tp+ph/2); g.rotate(-Math.PI/2); g.fillText(yUnit, 0, 0); g.restore();
+  // reference line
+  g.setLineDash([5,4]); g.strokeStyle = "#8a8980"; g.beginPath();
+  for (let i=0;i<=400;i++){ const t=T*i/400; const y=Y(refFn(t)); i?g.lineTo(X(t),y):g.moveTo(X(t),y);} g.stroke(); g.setLineDash([]);
+  // series
+  series.forEach(s => { g.strokeStyle = css(s.a.col); g.lineWidth = s.a.id==="DLA"?2.2:1.6; g.beginPath();
+    s.ys.forEach((v,i) => { const x=X(s.t0+i*s.dt), y=Y(v); i?g.lineTo(x,y):g.moveTo(x,y); }); g.stroke(); });
+  // hover
+  const tip = $(tid);
+  cv.onmousemove = e => {
+    const rect = cv.getBoundingClientRect(), mx = e.clientX-rect.left;
+    if (mx < L || mx > W-R) { tip.style.display="none"; return; }
+    const t = (mx-L)/pw*T;
+    let html = `<b>t = ${t.toFixed(2)} s</b><br>${refName}: ${fmt(refFn(t))}`;
+    series.forEach(s => { const i = Math.max(0, Math.min(s.ys.length-1, Math.round((t-s.t0)/s.dt)));
+      html += `<br><span class="sw" style="background:${s.a.col};width:9px;height:9px"></span> ${s.a.name}: ${s.ys[i].toFixed(1)}`; });
+    tip.innerHTML = html; tip.style.display = "block";
+    tip.style.left = Math.min(mx+12, W-170)+"px"; tip.style.top = "8px";
+  };
+  cv.onmouseleave = () => tip.style.display = "none";
+}
+function niceMax(v){ if (v<=0) return 1; const p=10**Math.floor(Math.log10(v)); const n=v/p; return (n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*p; }
+function niceStep(T){ return T<=10?1:T<=20?2:T<=30?5:10; }
+function fmt(v){ return Number.isInteger(Math.round(v*1000)/1000) || Math.abs(v)>=10 ? Math.round(v).toString() : v.toFixed(1); }
+window.addEventListener("resize", () => last && render(last));
+run();
+</script>
+</body>
+</html>
