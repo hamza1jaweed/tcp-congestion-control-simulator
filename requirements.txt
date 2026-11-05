@@ -1,0 +1,3 @@
+# The simulator and web demo need only the Python standard library.
+# matplotlib is used by results/run_experiments.py to draw the figures.
+matplotlib>=3.5
